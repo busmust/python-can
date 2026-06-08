@@ -134,6 +134,7 @@ warn_unused_ignores = true
 exclude = [
     "^doc/conf.py$",
     "^test",
+    "^can/interfaces/bmcan",
     "^can/interfaces/etas",
     "^can/interfaces/gs_usb",
     "^can/interfaces/ics_neovi",
@@ -183,12 +184,14 @@ ignore = [
     "PGH003",  # blanket-type-ignore
     "RUF012",  # mutable-class-default
 ]
+"can/interfaces/bmcan/*" = ["ALL"]
 "can/cli.py" = ["T20"]  # flake8-print
 "can/logger.py" = ["T20"]  # flake8-print
 "can/player.py" = ["T20"]  # flake8-print
 "can/bridge.py" = ["T20"]  # flake8-print
 "can/viewer.py" = ["T20"]  # flake8-print
 "examples/*" = ["T20"]  # flake8-print
+"examples/bmcan/*" = ["T20"]  # flake8-print
 
 [tool.ruff.lint.isort]
 known-first-party = ["can"]

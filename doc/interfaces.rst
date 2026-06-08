@@ -18,6 +18,7 @@ The following hardware interfaces are included in python-can:
    :maxdepth: 1
 
    interfaces/canalystii
+   interfaces/bmcan
    interfaces/cantact
    interfaces/etas
    interfaces/gs_usb

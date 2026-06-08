@@ -7,6 +7,7 @@ from can._entry_points import read_entry_points
 __all__ = [
     "BACKENDS",
     "VALID_INTERFACES",
+    "bmcan",
     "canalystii",
     "cantact",
     "etas",
@@ -38,6 +39,7 @@ BACKENDS: dict[str, tuple[str, str]] = {
     "socketcan": ("can.interfaces.socketcan", "SocketcanBus"),
     "serial": ("can.interfaces.serial.serial_can", "SerialBus"),
     "pcan": ("can.interfaces.pcan", "PcanBus"),
+    "bmcan": ("can.interfaces.bmcan", "BmCanBus"),
     "usb2can": ("can.interfaces.usb2can", "Usb2canBus"),
     "ixxat": ("can.interfaces.ixxat", "IXXATBus"),
     "nican": ("can.interfaces.nican", "NicanBus"),

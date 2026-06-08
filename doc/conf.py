@@ -141,8 +141,8 @@ nitpick_ignore = [
     ("py:class", "_thread.lock"),
 ]
 
-# mock windows specific attributes
-autodoc_mock_imports = ["win32com", "pythoncom"]
+# mock optional platform or driver-specific modules
+autodoc_mock_imports = ["win32com", "pythoncom", "can.interfaces.bmcan.bmapi"]
 ctypes.windll = MagicMock()
 ctypesutil.HRESULT = ctypes.c_long
 
