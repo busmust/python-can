@@ -1,6 +1,27 @@
 python-can
 ==========
 
+BUSMUST bmcan fork
+------------------
+
+This BUSMUST-maintained fork is based on upstream
+`python-can <https://github.com/hardbyte/python-can>`__ and adds the ``bmcan``
+interface for BUSMUST USB CAN FD adapters.
+
+Install or replace an existing python-can installation with the latest BUSMUST
+bmcan build:
+
+.. code-block:: bash
+
+   python -m pip install --upgrade --force-reinstall "python-can @ git+https://github.com/busmust/python-can.git@bmcan-latest"
+
+The BMAPI driver library must be installed separately and visible to the OS
+loader. See ``doc/interfaces/bmcan.rst`` and ``examples/bmcan/`` for bmcan
+configuration, driver loading notes, and examples.
+
+Original upstream README
+------------------------
+
 |pypi| |conda| |python_implementation| |downloads| |downloads_monthly|
 
 |docs| |github-actions| |coverage| |formatter|
