@@ -18,6 +18,12 @@ bmcan build:
 
 The bmcan source, documentation, and examples are maintained on the
 `bmcan-latest branch <https://github.com/busmust/python-can/tree/bmcan-latest>`__.
+The BMAPI driver library is required at runtime. Download the BMAPI SDK from
+`busmust/bmapi-sdk <https://github.com/busmust/bmapi-sdk>`__, then make the
+matching library visible to the OS loader: add the folder containing
+``BMAPI64.dll``/``BMAPI.dll`` to ``PATH`` on Windows, or the folder containing
+``libbmapi64.so``/``libbmapi.so`` to ``LD_LIBRARY_PATH`` or the system loader
+path on Linux.
 
 Original upstream README
 ------------------------
@@ -104,7 +110,9 @@ Features
 Example usage
 -------------
 
-``pip install python-can``
+.. code-block:: bash
+
+   python -m pip install --upgrade --force-reinstall "python-can @ git+https://github.com/busmust/python-can.git@bmcan-latest"
 
 .. code:: python
 
@@ -113,10 +121,12 @@ Example usage
 
     # create a bus instance using 'with' statement,
     # this will cause bus.shutdown() to be called on the block exit;
-    # many other interfaces are supported as well (see documentation)
-    with can.Bus(interface='socketcan',
-                  channel='vcan0',
-                  receive_own_messages=True) as bus:
+    with can.Bus(interface='bmcan',
+                 channel=0,
+                 fd=True,
+                 bitrate=500000,
+                 data_bitrate=2000000,
+                 tres=True) as bus:
 
        # send a message
        message = can.Message(arbitration_id=123, is_extended_id=True,
