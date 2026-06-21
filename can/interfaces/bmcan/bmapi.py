@@ -1082,8 +1082,8 @@ class BM_TxTaskTypeDef(ctypes.Structure):
             "flags",
             ctypes.c_ubyte,
         ),  # /**< CAN message control Flags, see BM_MessageFlagsTypeDef for details. */
-        ("length", ctypes.c_uint16),  # /**< Length of payload in bytes (not DLC) */
-        ("reserved", ctypes.c_ubyte),  # /**< Reserved */
+        ("length", ctypes.c_ubyte),  # /**< Length of payload in bytes (not DLC) */
+        ("delay", ctypes.c_uint16),  # /**< ms delay before the first message */
         ("cycle", ctypes.c_uint16),  # /**< ms delay between rounds */
         ("nrounds", ctypes.c_uint16),  # /**< num of cycles */
         ("nmessages", ctypes.c_uint16),  # /**< messages per round */

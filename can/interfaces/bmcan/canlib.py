@@ -386,7 +386,7 @@ class BmCanBus(BusABC):
         bmtxtask = bmapi.BM_TxTaskTypeDef()
         txtask = BmCanTaskWrapper(self, msg, period)
         bmtxtask.type = bmapi.BM_TXTASK_FIXED
-        bmtxtask.unused = 0
+        bmtxtask.version = 1
         bmtxtask.flags |= bmapi.BM_MESSAGE_FLAGS_IDE if msg.is_extended_id else 0
         bmtxtask.flags |= bmapi.BM_MESSAGE_FLAGS_RTR if msg.is_remote_frame else 0
         bmtxtask.flags |= bmapi.BM_MESSAGE_FLAGS_FDF if msg.is_fd else 0
@@ -394,8 +394,8 @@ class BmCanBus(BusABC):
         bmtxtask.flags |= bmapi.BM_MESSAGE_FLAGS_ESI if msg.error_state_indicator else 0
         bmtxtask.length = msg.dlc
         bmtxtask.e2e = 0
-        bmtxtask.reserved = 0
         cycle = round(period * 1000)
+        bmtxtask.delay = 0
         if duration is not None:
             nrounds = round(duration / period)
             bmtxtask.nrounds = nrounds if nrounds < 0xFFFF else 0xFFFF - 1
@@ -922,6 +922,17 @@ class BmCanBus(BusABC):
         # Note if dlc > 8, BMAPI would ignore 'longPduEnabled' and always enable longPdu
         self._isotp_config.longPduEnabled = kwargs.get("longpdu", False)
         self._isotp_config.functionalAddressingEnabled = kwargs.get("functional", False)
+        disable_hardware_isotp = kwargs.get("disable_hardware_isotp", None)
+        if disable_hardware_isotp is None and "hardware_isotp" in kwargs:
+            disable_hardware_isotp = not kwargs["hardware_isotp"]
+        if disable_hardware_isotp is None:
+            disable_hardware_isotp = False
+        if hasattr(self._isotp_config.flowcontrol, "hardwareIsotpDisabled"):
+            self._isotp_config.flowcontrol.hardwareIsotpDisabled = int(
+                disable_hardware_isotp
+            )
+        else:
+            self._isotp_config.flowcontrol.reserved = int(disable_hardware_isotp)
         ecuTimeout = kwargs.get("ecuTimeout", {})
         testerTimeout = kwargs.get("testerTimeout", {})
         self._isotp_config.ecuTimeout.a = ecuTimeout.get("a", 0)
