@@ -49,9 +49,9 @@ Example configuration for the first available BUSMUST CAN channel:
  ``"192.168.41.255"``.
 
 ``raise_on_send_error`` (default ``False``)
- By default, BMAPI send errors trigger :meth:`~can.interfaces.bmcan.BmCanBus.recover_from_error`
- and are then absorbed for compatibility with the legacy backend. Set this
- option to ``True`` to raise
+ By default, BMAPI send errors trigger ``BmCanBus.recover_from_error()`` and
+ are then absorbed for compatibility with the legacy backend. Set this option
+ to ``True`` to raise
  :class:`~can.interfaces.bmcan.BmOperationError` after the recovery check, which
  is closer to the generic python-can :meth:`~can.BusABC.send` contract.
 
@@ -88,8 +88,8 @@ support fall back to python-can's thread-based cyclic sender.
 
 Stopping the object returned by :meth:`~can.BusABC.send_periodic`, or calling
 :meth:`~can.BusABC.stop_all_periodic_tasks`, stops the BMAPI hardware task.
-The BMAPI-specific :meth:`~can.interfaces.bmcan.BmCanBus.cancel_send` method
-can be used to cancel pending blocking writes on the channel.
+The BMAPI-specific ``BmCanBus.cancel_send()`` method can be used to cancel
+pending blocking writes on the channel.
 
 Bus
 ---
