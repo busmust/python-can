@@ -50,16 +50,22 @@ Example configuration for the first available BUSMUST CAN channel:
 
 ``raise_on_send_error`` (default ``False``)
  By default, BMAPI send errors trigger :meth:`~can.interfaces.bmcan.BmCanBus.recover_from_error`
- and are then absorbed for compatibility with the BUSMUST BMAPI SDK python-can
- 4.0.0 backend. Set this option to ``True`` to raise
+ and are then absorbed for compatibility with the legacy backend. Set this
+ option to ``True`` to raise
  :class:`~can.interfaces.bmcan.BmOperationError` after the recovery check, which
  is closer to the generic python-can :meth:`~can.BusABC.send` contract.
 
 Driver library loading
 ----------------------
 
-The BMAPI dynamic library is not distributed with python-can. Install the BMAPI
-SDK or make the matching library available to the operating system loader.
+The public ``busmust/python-can`` source repository and Python wheel do not
+include BMAPI binaries. For those distributions, install the BMAPI SDK or make
+the matching library available to the operating system loader.
+
+A versioned standalone ZIP in the BUSMUST GitHub Release may include the
+matching BMAPI libraries in the python-can root and package directory. Its
+``example.run.bat`` and ``example.run.sh`` launchers use the package-local
+library without installation.
 
 On Windows, make ``BMAPI.dll`` or ``BMAPI64.dll`` available through ``PATH``.
 On Linux, make ``libbmapi.so`` or ``libbmapi64.so`` available through the
@@ -67,18 +73,18 @@ system library path, ``LD_LIBRARY_PATH``, or another loader configuration
 mechanism.
 
 The backend also checks the package directory and PyInstaller bundle directory
-for the matching BMAPI library name. This is intended for local applications
-that package BMAPI themselves; the python-can source tree should not contain
-BMAPI binaries.
+for the matching BMAPI library name. This supports the standalone Release ZIP
+and local applications that package BMAPI themselves.
 
 Periodic transmission
 ---------------------
 
-``BmCanBus`` uses BMAPI hardware transmit tasks for single-message periodic
-transmission when the device reports available TX task slots. Calls that use
-multiple messages, ``modifier_callback``, ``autostart=False``, or devices
-without hardware TX task support fall back to python-can's thread-based cyclic
-sender.
+``BmCanBus`` uses BMAPI hardware transmit tasks for indefinite single-message
+periodic transmission without a ``modifier_callback`` when the device reports
+available TX task slots. ``autostart=False`` creates a dormant hardware task
+that allocates its slot only when started. Calls that use multiple messages, a
+finite duration, ``modifier_callback``, or devices without hardware TX task
+support fall back to python-can's thread-based cyclic sender.
 
 Stopping the object returned by :meth:`~can.BusABC.send_periodic`, or calling
 :meth:`~can.BusABC.stop_all_periodic_tasks`, stops the BMAPI hardware task.

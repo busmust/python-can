@@ -9,19 +9,29 @@ This BUSMUST-maintained fork is based on upstream
 interface for BUSMUST USB CAN FD adapters.
 
 Install or replace an existing python-can installation with the latest BUSMUST
-bmcan build:
+bmcan build from the
+`bmcan-latest branch <https://github.com/busmust/python-can/tree/bmcan-latest>`__:
 
 .. code-block:: bash
 
    python -m pip install --upgrade --force-reinstall "python-can @ git+https://github.com/busmust/python-can.git@bmcan-latest"
 
-The BMAPI driver library is required at runtime. Download the BMAPI SDK from
+The public source repository and Python wheel contain source code only. The
+BMAPI driver library is required at runtime. Download the BMAPI SDK from
 `busmust/bmapi-sdk <https://github.com/busmust/bmapi-sdk>`__, then make the
 matching library visible to the OS loader: add the folder containing
 ``BMAPI64.dll``/``BMAPI.dll`` to ``PATH`` on Windows, or the folder containing
 ``libbmapi64.so``/``libbmapi.so`` to ``LD_LIBRARY_PATH`` or the system loader
-path on Linux. See ``doc/interfaces/bmcan.rst`` and ``examples/bmcan/`` for
-bmcan configuration, driver loading notes, and examples.
+path on Linux.
+
+For offline use, a versioned standalone ZIP containing the matching BMAPI
+runtime libraries and launchers is available from
+`GitHub Releases <https://github.com/busmust/python-can/releases>`__.
+See the `bmcan interface documentation
+<https://github.com/busmust/python-can/blob/bmcan-latest/doc/interfaces/bmcan.rst>`__
+and `examples
+<https://github.com/busmust/python-can/tree/bmcan-latest/examples/bmcan>`__
+for configuration, driver loading notes, and sample programs.
 
 Original upstream README
 ------------------------

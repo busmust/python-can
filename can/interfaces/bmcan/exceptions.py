@@ -1,5 +1,7 @@
 """Exception declarations for the BUSMUST BMAPI interface."""
 
+from __future__ import annotations
+
 from typing import Any
 
 from can import CanError, CanInitializationError, CanOperationError

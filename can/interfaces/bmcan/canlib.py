@@ -1,6 +1,8 @@
 # mypy: ignore-errors
 """BUSMUST BMAPI interface."""
 
+from __future__ import annotations
+
 import ctypes
 import logging
 import os
@@ -10,8 +12,12 @@ import time
 from collections.abc import Callable, Sequence
 from typing import Any
 
-from can import BusABC, CanProtocol, Message
-from can.broadcastmanager import CyclicSendTaskABC
+from can import BusABC, CanOperationError, CanProtocol, Message
+from can.broadcastmanager import (
+    LimitedDurationCyclicSendTaskABC,
+    ModifiableCyclicTaskABC,
+    RestartableCyclicTaskABC,
+)
 from can.bus import BusState
 from can.util import dlc2len, len2dlc
 
@@ -66,57 +72,137 @@ except Exception as exc:
     raise exc
 
 
-class BmCanTaskWrapper(CyclicSendTaskABC):
+class _NoFreeTxTaskSlot(CanOperationError):
+    """Raised when all BMAPI hardware periodic task slots are occupied."""
+
+
+def _encode_arbitration_id(message: Message) -> int:
+    """Encode a python-can arbitration ID in the format expected by BMAPI."""
+    if not message.is_extended_id:
+        return message.arbitration_id
+    return ((message.arbitration_id >> 18) & 0x7FF) | (
+        (message.arbitration_id & 0x3FFFF) << 11
+    )
+
+
+def _copy_message_to_txtask(txtask: "bmapi.BM_TxTaskTypeDef", message: Message) -> None:
+    """Replace the CAN frame fields of a BMAPI transmit task."""
+    txtask.flags = 0
+    txtask.flags |= bmapi.BM_MESSAGE_FLAGS_IDE if message.is_extended_id else 0
+    txtask.flags |= bmapi.BM_MESSAGE_FLAGS_RTR if message.is_remote_frame else 0
+    txtask.flags |= bmapi.BM_MESSAGE_FLAGS_FDF if message.is_fd else 0
+    txtask.flags |= bmapi.BM_MESSAGE_FLAGS_BRS if message.bitrate_switch else 0
+    txtask.flags |= bmapi.BM_MESSAGE_FLAGS_ESI if message.error_state_indicator else 0
+    txtask.id = _encode_arbitration_id(message)
+    txtask.length = message.dlc
+    for index in range(len(txtask.payload)):
+        txtask.payload[index] = message.data[index] if index < len(message.data) else 0
+
+
+class BmCanTaskWrapper(
+    LimitedDurationCyclicSendTaskABC,
+    ModifiableCyclicTaskABC,
+    RestartableCyclicTaskABC,
+):
     """Hardware cyclic transmit task backed by a BMAPI TX task entry."""
 
-    def __init__(self, bus: "BmCanBus", msg: Message, period: float):
-        super().__init__(msg, period)
+    def __init__(
+        self, bus: "BmCanBus", msg: Message, period: float, duration: float | None
+    ):
+        super().__init__(msg, period, duration)
         self._bus = bus
         self._txtask_index = -1
         self._bmtxtask: bmapi.BM_TxTaskTypeDef | None = None
 
-    def start(self) -> bool:
-        assert self._txtask_index == -1, "Task is already started"
-        index = self.get_first_free_txtask_index()
-        if index == -1:
-            return False
-        assert self._bmtxtask is not None
-        self._bmtxtask.type = bmapi.BM_TXTASK_FIXED
-        self._txtask_index = index
-        command = bmapi.BM_CAN_TXTASK_TABLE | bmapi.BM_CAN_CTRL_WR
-        bmapi.BM_Control(
-            self._bus._handle,
-            command,
-            index,
-            self._bus._channelinfo.port,
-            ctypes.byref(self._bmtxtask),
-            ctypes.sizeof(self._bmtxtask),
-        )
-        return True
+    def start(self) -> None:
+        """Start or restart this task, allocating a hardware slot on demand."""
+        slots = self._bus._get_txtask_slots()
+        with self._bus._txtask_lock:
+            if self._txtask_index >= 0:
+                return
+            if getattr(self._bus, "_is_shutdown", False):
+                raise CanOperationError(
+                    "Cannot start a periodic task on a shut down bus"
+                )
+            try:
+                index = slots.index(None)
+            except ValueError as exc:
+                raise _NoFreeTxTaskSlot(
+                    "No free BMAPI hardware periodic transmit task slot"
+                ) from exc
+
+            assert self._bmtxtask is not None
+            slots[index] = self
+            self._txtask_index = index
+            self._bmtxtask.type = bmapi.BM_TXTASK_FIXED
+            command = bmapi.BM_CAN_TXTASK_TABLE | bmapi.BM_CAN_CTRL_WR
+            try:
+                bmapi.BM_Control(
+                    self._bus._handle,
+                    command,
+                    index,
+                    self._bus._channelinfo.port,
+                    ctypes.byref(self._bmtxtask),
+                    ctypes.sizeof(self._bmtxtask),
+                )
+            except Exception:
+                slots[index] = None
+                self._txtask_index = -1
+                raise
 
     def stop(self) -> None:
-        if self._txtask_index < 0 or self._bmtxtask is None:
-            return
-        self._bmtxtask.type = bmapi.BM_TXTASK_INVALID
-        command = bmapi.BM_CAN_TXTASK_TABLE | bmapi.BM_CAN_CTRL_WR
-        bmapi.BM_Control(
-            self._bus._handle,
-            command,
-            self._txtask_index,
-            self._bus._channelinfo.port,
-            ctypes.byref(self._bmtxtask),
-            ctypes.sizeof(self._bmtxtask),
-        )
-        self._txtask_index = -1
+        slots = self._bus._get_txtask_slots()
+        with self._bus._txtask_lock:
+            if self._txtask_index < 0 or self._bmtxtask is None:
+                return
+            index = self._txtask_index
+            invalid_task = bmapi.BM_TxTaskTypeDef()
+            ctypes.memmove(
+                ctypes.byref(invalid_task),
+                ctypes.byref(self._bmtxtask),
+                ctypes.sizeof(invalid_task),
+            )
+            invalid_task.type = bmapi.BM_TXTASK_INVALID
+            command = bmapi.BM_CAN_TXTASK_TABLE | bmapi.BM_CAN_CTRL_WR
+            bmapi.BM_Control(
+                self._bus._handle,
+                command,
+                index,
+                self._bus._channelinfo.port,
+                ctypes.byref(invalid_task),
+                ctypes.sizeof(invalid_task),
+            )
+            if slots[index] is self:
+                slots[index] = None
+            self._txtask_index = -1
+            self._bmtxtask.type = bmapi.BM_TXTASK_INVALID
 
-    def get_first_free_txtask_index(self) -> int:
-        for i in range(self._bus._ntxtask):
-            if all(
-                not isinstance(task, BmCanTaskWrapper) or i != task._txtask_index
-                for task in self._bus._periodic_tasks
-            ):
-                return i
-        return -1
+    def modify_data(self, messages: Sequence[Message] | Message) -> None:
+        """Replace the frame while preserving the task ID and timing."""
+        converted = self._check_and_convert_messages(messages)
+        self._check_modified_messages(converted)
+        msg = converted[0]
+        assert self._bmtxtask is not None
+        with self._bus._txtask_lock:
+            updated_task = bmapi.BM_TxTaskTypeDef()
+            ctypes.memmove(
+                ctypes.byref(updated_task),
+                ctypes.byref(self._bmtxtask),
+                ctypes.sizeof(updated_task),
+            )
+            _copy_message_to_txtask(updated_task, msg)
+            if self._txtask_index >= 0:
+                command = bmapi.BM_CAN_TXTASK_TABLE | bmapi.BM_CAN_CTRL_WR
+                bmapi.BM_Control(
+                    self._bus._handle,
+                    command,
+                    self._txtask_index,
+                    self._bus._channelinfo.port,
+                    ctypes.byref(updated_task),
+                    ctypes.sizeof(updated_task),
+                )
+            self._bmtxtask = updated_task
+            self.messages = converted
 
 
 class BmCanBus(BusABC):
@@ -338,6 +424,9 @@ class BmCanBus(BusABC):
         except BmError as e:
             ntxtask.value = 0
         self._ntxtask = ntxtask.value
+        self._txtask_lock = threading.Lock()
+        self._txtask_slots: list[BmCanTaskWrapper | None] = [None] * self._ntxtask
+        self._shutdown_lock = threading.Lock()
 
         bmtxtask = bmapi.BM_TxTaskTypeDef()
         for index in range(self._ntxtask):
@@ -352,6 +441,14 @@ class BmCanBus(BusABC):
                 ctypes.sizeof(bmtxtask),
             )
         self._lock = threading.Lock()
+
+    def _get_txtask_slots(self) -> list[BmCanTaskWrapper | None]:
+        """Return the active hardware-slot registry, initializing test doubles."""
+        if not hasattr(self, "_txtask_lock"):
+            self._txtask_lock = threading.Lock()
+        if not hasattr(self, "_txtask_slots"):
+            self._txtask_slots = [None] * self._ntxtask
+        return self._txtask_slots
 
     def get_open_time(self):
         return self._start_time
@@ -374,7 +471,7 @@ class BmCanBus(BusABC):
 
         if (
             self._ntxtask <= 0
-            or not autostart
+            or duration is not None
             or modifier_callback is not None
             or len(messages) != 1
         ):
@@ -384,39 +481,24 @@ class BmCanBus(BusABC):
 
         msg = messages[0]
         bmtxtask = bmapi.BM_TxTaskTypeDef()
-        txtask = BmCanTaskWrapper(self, msg, period)
+        txtask = BmCanTaskWrapper(self, msg, period, duration)
         bmtxtask.type = bmapi.BM_TXTASK_FIXED
         bmtxtask.version = 1
-        bmtxtask.flags |= bmapi.BM_MESSAGE_FLAGS_IDE if msg.is_extended_id else 0
-        bmtxtask.flags |= bmapi.BM_MESSAGE_FLAGS_RTR if msg.is_remote_frame else 0
-        bmtxtask.flags |= bmapi.BM_MESSAGE_FLAGS_FDF if msg.is_fd else 0
-        bmtxtask.flags |= bmapi.BM_MESSAGE_FLAGS_BRS if msg.bitrate_switch else 0
-        bmtxtask.flags |= bmapi.BM_MESSAGE_FLAGS_ESI if msg.error_state_indicator else 0
-        bmtxtask.length = msg.dlc
+        _copy_message_to_txtask(bmtxtask, msg)
         bmtxtask.e2e = 0
         cycle = round(period * 1000)
         bmtxtask.delay = 0
-        if duration is not None:
-            nrounds = round(duration / period)
-            bmtxtask.nrounds = nrounds if nrounds < 0xFFFF else 0xFFFF - 1
-        else:
-            bmtxtask.nrounds = 0xFFFF
+        bmtxtask.nrounds = 0xFFFF
         bmtxtask.cycle = cycle
         bmtxtask.nmessages = 1
-        bmtxtask.id = (
-            ((msg.arbitration_id << 18) & 0x7FF)
-            | ((msg.arbitration_id) & 0x3FFFF) << 11
-            if msg.is_extended_id
-            else msg.arbitration_id
-        )
-        for i in range(bmtxtask.length):
-            bmtxtask.payload[i] = msg.data[i]
         txtask._bmtxtask = bmtxtask
-        succeed = txtask.start()
-        if not succeed:
-            return super()._send_periodic_internal(
-                msgs, period, duration, autostart, modifier_callback
-            )
+        if autostart:
+            try:
+                txtask.start()
+            except _NoFreeTxTaskSlot:
+                return super()._send_periodic_internal(
+                    msgs, period, duration, autostart, modifier_callback
+                )
         return txtask
 
     def stop_all_periodic_tasks(self, remove_tasks: bool = True) -> None:
@@ -666,20 +748,24 @@ class BmCanBus(BusABC):
             self._handle = None
 
     def shutdown(self) -> None:
-        try:
-            super().shutdown()
-        except AttributeError:
-            pass
+        if not hasattr(self, "_shutdown_lock"):
+            self._shutdown_lock = threading.Lock()
+        with self._shutdown_lock:
+            try:
+                super().shutdown()
+            except AttributeError:
+                pass
 
-        if self in self.bus_list:
-            self.bus_list.remove(self)
-        handle = getattr(self, "_handle", None)
-        if handle:
+            if self in self.bus_list:
+                self.bus_list.remove(self)
+            handle = getattr(self, "_handle", None)
+            if not handle:
+                return
             try:
                 bmapi.BM_Close(handle)
             except BmError as exc:
                 raise BmOperationError.from_generic(exc) from exc
-        self._handle = bmapi.BM_ChannelHandle()
+            self._handle = bmapi.BM_ChannelHandle()
 
     def reset(self) -> None:
         try:
