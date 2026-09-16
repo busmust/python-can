@@ -22,8 +22,8 @@ class FakeTxTask(ctypes.Structure):
     _fields_ = [
         ("type", ctypes.c_uint8),
         ("version", ctypes.c_uint8),
-        ("flags", ctypes.c_uint16),
-        ("length", ctypes.c_uint16),
+        ("flags", ctypes.c_uint8),
+        ("length", ctypes.c_uint8),
         ("e2e", ctypes.c_uint8),
         ("delay", ctypes.c_uint16),
         ("nrounds", ctypes.c_uint16),
@@ -37,8 +37,10 @@ class FakeTxTask(ctypes.Structure):
 @pytest.fixture()
 def mocked_bmapi(monkeypatch: pytest.MonkeyPatch):
     control = MagicMock(return_value=0)
+    set_tx_task = MagicMock(return_value=0)
     monkeypatch.setattr(canlib.bmapi, "BM_TxTaskTypeDef", FakeTxTask)
     monkeypatch.setattr(canlib.bmapi, "BM_Control", control)
+    monkeypatch.setattr(canlib.bmapi, "BM_SetTxTask", set_tx_task)
     monkeypatch.setattr(canlib.bmapi, "BM_ClearBuffer", MagicMock(return_value=0))
     monkeypatch.setattr(canlib.bmapi, "BM_Close", MagicMock(return_value=0))
     monkeypatch.setattr(canlib.bmapi, "BM_ChannelHandle", MagicMock(return_value=None))
@@ -135,12 +137,82 @@ def test_modify_data_updates_dormant_and_running_task(
     task.modify_data(make_msg(data=(9, 8)))
     assert list(task._bmtxtask.payload[:4]) == [9, 8, 0, 0]
     mocked_bmapi.assert_not_called()
+    canlib.bmapi.BM_SetTxTask.assert_not_called()
 
     task.start()
     mocked_bmapi.reset_mock()
     task.modify_data(make_msg(data=(7, 6, 5)))
     assert list(task._bmtxtask.payload[:4]) == [7, 6, 5, 0]
-    mocked_bmapi.assert_called_once()
+    canlib.bmapi.BM_SetTxTask.assert_called_once()
+    # Running updates must not bypass the single-slot transactional entry.
+    mocked_bmapi.assert_not_called()
+
+
+def test_running_modify_data_uses_set_txtask_keep_context(
+    mocked_bmapi: MagicMock,
+) -> None:
+    keep_context = canlib.bmapi.BM_TXTASK_FLAGS_KEEP_CONTEXT
+    # Snapshot the flags at call time: the implementation clears the one-shot
+    # policy bit on the same structure after a successful call.
+    snapshots: list[tuple[object, int, int]] = []
+    canlib.bmapi.BM_SetTxTask.side_effect = (
+        lambda handle, txtask, slot: snapshots.append((handle, txtask.flags, slot))
+    )
+    bus = make_bus()
+    task = bus.send_periodic(make_msg(0x100, (1, 2)), 0.05)
+    index = task._txtask_index
+    assert index >= 0
+
+    task.modify_data(make_msg(0x100, (3, 4)))
+
+    canlib.bmapi.BM_SetTxTask.assert_called_once()
+    handle, flags, slot = snapshots[0]
+    assert handle is bus._handle
+    assert slot == index
+    assert flags & keep_context
+    assert list(task._bmtxtask.payload[:2]) == [3, 4]
+    # The one-shot policy bit must not persist in the local template.
+    assert not task._bmtxtask.flags & keep_context
+
+
+def test_running_modify_data_preserves_frame_flags(
+    mocked_bmapi: MagicMock,
+) -> None:
+    snapshots: list[int] = []
+    canlib.bmapi.BM_SetTxTask.side_effect = (
+        lambda handle, txtask, slot: snapshots.append(txtask.flags)
+    )
+    bus = make_bus()
+    task = bus.send_periodic(
+        make_msg(0x18FF00, (1,), is_extended_id=True), 0.05
+    )
+
+    task.modify_data(make_msg(0x18FF00, (2,), is_extended_id=True))
+
+    assert snapshots[0] & canlib.bmapi.BM_MESSAGE_FLAGS_IDE
+    assert snapshots[0] & canlib.bmapi.BM_TXTASK_FLAGS_KEEP_CONTEXT
+
+
+def test_running_modify_data_without_new_runtime_raises_clear_error(
+    mocked_bmapi: MagicMock,
+) -> None:
+    bus = make_bus()
+    task = bus.send_periodic(make_msg(), 0.1)
+    dormant = bus.send_periodic(make_msg(0x101), 0.1, autostart=False)
+    control_calls = len(mocked_bmapi.call_args_list)
+    canlib.bmapi.BM_SetTxTask = None
+
+    with pytest.raises(can.CanOperationError, match="BM_SetTxTask"):
+        task.modify_data(make_msg(data=(9, 9)))
+
+    # No legacy fallback (BM_Control call count unchanged) and no state change.
+    assert len(mocked_bmapi.call_args_list) == control_calls
+    assert list(task._bmtxtask.payload[:2]) == [1, 2]
+    assert task._txtask_index == 0
+
+    # Dormant tasks keep updating the local template without the new entry.
+    dormant.modify_data(make_msg(0x101, data=(5,)))
+    assert list(dormant._bmtxtask.payload[:1]) == [5]
 
 
 def test_modify_data_rejects_arbitration_id_change(
@@ -261,7 +333,7 @@ def test_modify_failure_preserves_previous_task(mocked_bmapi: MagicMock) -> None
     task = bus.send_periodic(make_msg(data=(1, 2)), 0.1)
     previous_task = task._bmtxtask
     previous_messages = task.messages
-    mocked_bmapi.side_effect = RuntimeError("modify failed")
+    canlib.bmapi.BM_SetTxTask.side_effect = RuntimeError("modify failed")
 
     with pytest.raises(RuntimeError, match="modify failed"):
         task.modify_data(make_msg(data=(9, 9)))

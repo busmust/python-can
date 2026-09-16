@@ -178,7 +178,7 @@ class BmCanTaskWrapper(
             self._bmtxtask.type = bmapi.BM_TXTASK_INVALID
 
     def modify_data(self, messages: Sequence[Message] | Message) -> None:
-        """Replace the frame while preserving the task ID and timing."""
+        """Replace the frame while preserving the task ID, timing, and progress."""
         converted = self._check_and_convert_messages(messages)
         self._check_modified_messages(converted)
         msg = converted[0]
@@ -192,14 +192,22 @@ class BmCanTaskWrapper(
             )
             _copy_message_to_txtask(updated_task, msg)
             if self._txtask_index >= 0:
-                command = bmapi.BM_CAN_TXTASK_TABLE | bmapi.BM_CAN_CTRL_WR
-                bmapi.BM_Control(
+                if bmapi.BM_SetTxTask is None:
+                    raise CanOperationError(
+                        "The loaded BMAPI runtime does not export "
+                        "BM_SetTxTask; update the BMAPI runtime shipped "
+                        "with this binding"
+                    )
+                updated_task.flags |= bmapi.BM_TXTASK_FLAGS_KEEP_CONTEXT
+                bmapi.BM_SetTxTask(
                     self._bus._handle,
-                    command,
+                    updated_task,
                     self._txtask_index,
-                    self._bus._channelinfo.port,
-                    ctypes.byref(updated_task),
-                    ctypes.sizeof(updated_task),
+                )
+                # KEEP_CONTEXT is a one-shot update policy, not a persistent
+                # frame attribute; never let it reach later direct writes.
+                updated_task.flags &= (
+                    0xFF ^ bmapi.BM_TXTASK_FLAGS_KEEP_CONTEXT
                 )
             self._bmtxtask = updated_task
             self.messages = converted

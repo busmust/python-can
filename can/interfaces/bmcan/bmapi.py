@@ -345,6 +345,14 @@ BM_TXTASK_RANDOMDATA = 4  # /**< Random Data TX task */
 BM_TXTASK_RANDOMID = 5  # /**< Random ID TX task */
 
 # /**
+# * @brief  One-shot update policy for BM_SetTxTask(): update a running task
+# *         while retaining its execution progress (phase, rounds, pattern
+# *         context). Requires firmware gen3 >=3.2.0 or gen2.5 >=2.6.1; older
+# *         firmware keeps its legacy write/reset behavior (BMAPI internal).
+# */
+BM_TXTASK_FLAGS_KEEP_CONTEXT = 0x80
+
+# /**
 # * @enum  BM_StatTypeDef
 # * @brief CAN runtime statistics item IDs, used in BM_GetStat().
 # */
@@ -2176,6 +2184,29 @@ BM_SetTxTasks.argtypes = [
 ]
 BM_SetTxTasks.restype = BM_StatusTypeDef
 BM_SetTxTasks.errcheck = check_status
+
+# /**
+# * @brief      Set one hardware TX task slot of the given channel.
+# * @param[in]  handle  Handle to the channel to operate on.
+# * @param[in]  txtask  TX task information, see BM_TxTaskTypeDef for details.
+# * @param[in]  index   Hardware task slot index, from 0 to 63 inclusive.
+# * @return     Operation status, see BM_StatusTypeDef for details.
+# * @note       BM_TXTASK_FLAGS_KEEP_CONTEXT requires firmware gen3 >=3.2.0 or
+# *             gen2.5 >=2.6.1 and retains execution progress while updating
+# *             the task. Older firmware uses its legacy write/reset behavior.
+# */
+# BMAPI BM_StatusTypeDef BM_SetTxTask(BM_ChannelHandle handle, const BM_TxTaskTypeDef* txtask, int index);
+# Bound lazily: older runtimes do not export this symbol, and importing the
+# backend must keep working with them.
+BM_SetTxTask = getattr(bmapi_dll, "BM_SetTxTask", None)
+if BM_SetTxTask is not None:
+    BM_SetTxTask.argtypes = [
+        BM_ChannelHandle,
+        ctypes.POINTER(BM_TxTaskTypeDef),
+        ctypes.c_int,
+    ]
+    BM_SetTxTask.restype = BM_StatusTypeDef
+    BM_SetTxTask.errcheck = check_status
 
 
 # /**

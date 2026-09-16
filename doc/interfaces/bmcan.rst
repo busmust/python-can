@@ -91,6 +91,14 @@ Stopping the object returned by :meth:`~can.BusABC.send_periodic`, or calling
 The BMAPI-specific ``BmCanBus.cancel_send()`` method can be used to cancel
 pending blocking writes on the channel.
 
+Calling ``modify_data()`` on a running hardware task updates the frame through
+BMAPI's single-slot ``BM_SetTxTask`` interface. A BMAPI runtime and firmware
+that support ``BM_TXTASK_FLAGS_KEEP_CONTEXT`` preserve the task's cycle phase,
+remaining rounds, and pattern context while applying the new payload. Older
+BMAPI runtimes remain importable but report a clear error for a running-task
+update; older firmware follows BMAPI's legacy write/reset compatibility path.
+See ``examples/bmcan/periodic_modify.py`` for a complete example.
+
 Bus
 ---
 
